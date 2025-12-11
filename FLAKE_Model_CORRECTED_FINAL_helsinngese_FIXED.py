@@ -3660,8 +3660,21 @@ def parse_flake_nml(nml_path):
     T_wML_0 = T_wML_in_C + 273.15
     T_bot_0 = T_bot_in_C + 273.15
     
-    # Reasonable initial guesses (not all from NML, but consistent)
-    T_mnw_0 = T_wML_0    # mean water column temp ~ mixed layer
+    # Calculate T_mnw from temperature profile using FLake shape functions
+    # IMPORTANT: T_mnw is NOT equal to T_wML! It's the depth-integrated mean temperature.
+    # For a stratified profile with mixed layer h_ML and thermocline below:
+    # T_mnw = (h_ML * T_wML + integral(T_thermocline)) / depth_w
+    # Using FLake shape function theory, this becomes:
+    # T_mnw = T_wML - (T_wML - T_bot) * (1 - h_ML/D) * C_T/2
+    #
+    # Note: This is an approximation. The exact value depends on the shape function integral.
+    # For initial conditions, we use C_T_min = 0.5
+    #
+    zeta_h_init = h_ML_in / depth_w_lk  # Dimensionless mixed layer depth
+    C_T_init = 0.5  # Use C_T_min for initialization
+    factor_mnw = (1.0 - zeta_h_init) * C_T_init / 2.0
+    T_mnw_0 = T_wML_0 - (T_wML_0 - T_bot_0) * factor_mnw
+
     T_B1_0  = T_bot_0    # bottom sediment layer at bottom temp
     
     # ----------------------------
@@ -3802,8 +3815,12 @@ import matplotlib.pyplot as plt
 import f90nml
 import os
 
-# Load the configuration from NML file
-cfg = parse_flake_nml("Heiligensee80-96.nml")  # You need to specify your NML file path here
+# ============================================================================
+# Main execution block - only run if this file is executed directly
+# ============================================================================
+if __name__ == "__main__":
+    # Load the configuration from NML file
+    cfg = parse_flake_nml("Heiligensee80-96.nml")  # You need to specify your NML file path here
 
 # Load the meteorological forcing data
 forcing = load_meteo_from_cfg(cfg)  # This reads the data file specified in the NML
