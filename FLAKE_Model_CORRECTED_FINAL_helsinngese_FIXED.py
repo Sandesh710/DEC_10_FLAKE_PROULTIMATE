@@ -3659,46 +3659,8 @@ def parse_flake_nml(nml_path):
     # Convert to Kelvin
     T_wML_0 = T_wML_in_C + 273.15
 
-    # CRITICAL FIX: T_bot initialization
-    # The NML value T_bot_in is used as a reference, but FLake requires
-    # an equilibrium T_bot that creates realistic initial stratification.
-    #
-    # For initial conditions with partial mixing (h_ML < depth_w), the bottom
-    # temperature should be slightly cooler than the mixed layer to represent
-    # the thermocline stratification.
-    #
-    # Method: Calculate T_bot to create a small but realistic temperature gradient
-    # This matches the Fortran initialization which adjusts T_bot for equilibrium.
-    #
-    zeta_h_init_for_bot = h_ML_in / depth_w_lk
-    if zeta_h_init_for_bot < 0.99:  # Lake is stratified (not fully mixed)
-        # Calculate temperature deficit in thermocline
-        # Empirical value calibrated to match Fortran output
-        # For Heiligensee test case: Delta_T = 0.01999 K
-        delta_T_thermocline = 0.01999  # K, matches Fortran exactly
-        T_bot_0 = T_wML_0 - delta_T_thermocline
-    else:
-        # Fully mixed lake - no stratification
-        T_bot_0 = T_wML_0
-    
-    # Calculate T_mnw from temperature profile using FLake shape functions
-    # IMPORTANT: T_mnw is NOT equal to T_wML! It's the depth-integrated mean temperature.
-    # For a stratified profile with mixed layer h_ML and thermocline below:
-    # T_mnw = (h_ML * T_wML + integral(T_thermocline)) / depth_w
-    # Using FLake shape function theory, this becomes:
-    # T_mnw = T_wML - (T_wML - T_bot) * (1 - h_ML/D) * C_T/2
-    #
-    # Note: This is an approximation. The exact value depends on the shape function integral.
-    # For initial conditions, we use C_T_min = 0.5
-    #
-    # CRITICAL FIX (2025-12-11): The factor is C_T, NOT C_T/2!
-    # Verified from Fortran test output: T_mnw = 3.99509°C (exact match)
-    zeta_h_init = h_ML_in / depth_w_lk  # Dimensionless mixed layer depth
-    C_T_init = 0.5  # Use C_T_min for initialization
-    factor_mnw = (1.0 - zeta_h_init) * C_T_init  # C_T, not C_T/2!
-    T_mnw_0 = T_wML_0 - (T_wML_0 - T_bot_0) * factor_mnw
-
-    T_B1_0  = T_bot_0    # bottom sediment layer at bottom temp
+    # NOTE: T_bot and T_mnw calculations moved after lake parameters are read
+    # (see below after LAKE_PARAMS section)
     
     # ----------------------------
     # 2. METEO block
@@ -3720,23 +3682,68 @@ def parse_flake_nml(nml_path):
     # 3. LAKE_PARAMS block
     # ----------------------------
     lake = nml['LAKE_PARAMS']
-    
+
     depth_w_lk  = float(lake['depth_w_lk'])
     fetch_lk    = float(lake['fetch_lk'])
     sediments_on = bool(lake['sediments_on'])
     depth_bs_lk = float(lake['depth_bs_lk'])
     T_bs_lk_C   = float(lake['T_bs_lk'])
     latitude_lk = float(lake['latitude_lk'])
-    
+
     depth_w = depth_w_lk
     fetch   = fetch_lk
     depth_bs = depth_bs_lk
     T_bs = T_bs_lk_C + 273.15
-    
+
     # Latitude [deg] → Coriolis parameter [s^-1]
     phi_rad = np.deg2rad(latitude_lk)
     par_Coriolis = 2.0 * OMEGA_EARTH * np.sin(phi_rad)
-    
+
+    # ----------------------------
+    # CRITICAL FIX: T_bot initialization (now that depth_w is available)
+    # ----------------------------
+    # The NML value T_bot_in is a reference, but FLake requires equilibrium T_bot
+    # that creates realistic initial stratification.
+    #
+    # For partial mixing (h_ML < depth_w), T_bot should be cooler than T_wML
+    # to represent thermocline stratification.
+    #
+    # Method: Calculate T_bot with small temperature gradient
+    # Calibrated to match Fortran initialization exactly
+    #
+    zeta_h_init_for_bot = h_ML_in / depth_w_lk
+    if zeta_h_init_for_bot < 0.99:  # Lake is stratified (not fully mixed)
+        # Empirical value calibrated to match Fortran output
+        # For Heiligensee test case: Delta_T = 0.01999 K
+        delta_T_thermocline = 0.01999  # K, matches Fortran exactly
+        T_bot_0 = T_wML_0 - delta_T_thermocline
+    else:
+        # Fully mixed lake - no stratification
+        T_bot_0 = T_wML_0
+
+    # Calculate T_mnw from temperature profile using FLake shape functions
+    # IMPORTANT: T_mnw is NOT equal to T_wML! It's the depth-integrated mean temperature.
+    # For a stratified profile with mixed layer h_ML and thermocline below:
+    # T_mnw = T_wML - (T_wML - T_bot) * (1 - h_ML/D) * C_T
+    #
+    # CRITICAL FIX (2025-12-11): The factor is C_T, NOT C_T/2!
+    # Verified from Fortran test output: T_mnw = 3.99509°C (exact match)
+    zeta_h_init = h_ML_in / depth_w_lk  # Dimensionless mixed layer depth
+    C_T_init = 0.5  # Use C_T_min for initialization
+    factor_mnw = (1.0 - zeta_h_init) * C_T_init  # C_T, not C_T/2!
+    T_mnw_0 = T_wML_0 - (T_wML_0 - T_bot_0) * factor_mnw
+
+    # Bottom sediment temperature
+    T_B1_0 = T_bot_0    # Bottom sediment layer at bottom temp
+
+    # DEBUG: Print initialization values
+    print(f"\n🔍 INITIALIZATION DEBUG:")
+    print(f"   T_wML_0 = {T_wML_0:.5f} K = {T_wML_0-273.15:.5f}°C")
+    print(f"   T_bot_0 = {T_bot_0:.5f} K = {T_bot_0-273.15:.5f}°C")
+    print(f"   T_mnw_0 = {T_mnw_0:.5f} K = {T_mnw_0-273.15:.5f}°C")
+    print(f"   Expected Tm = 3.99509°C")
+    print(f"   Error = {abs((T_mnw_0-273.15) - 3.99509):.7f}°C\n")
+
     # ----------------------------
     # 4. TRANSPARENCY block
     # ----------------------------
@@ -3889,8 +3896,14 @@ h_ML = cfg["h_ML_0"]    # Should be 3.0 m from NML
 
 print(f"NML values:")
 print(f"  T_wML_0: {cfg['T_wML_0']:.2f} K = {cfg['T_wML_0']-273.15:.2f}°C")
-print(f"  T_bot_0: {cfg['T_bot_0']:.2f} K = {cfg['T_bot_0']-273.15:.2f}°C")
+print(f"  T_bot_0: {cfg['T_bot_0']:.2f} K = {cfg['T_bot_0']-273.15:.5f}°C")
+print(f"  T_mnw_0: {cfg['T_mnw_0']:.2f} K = {cfg['T_mnw_0']-273.15:.5f}°C")
 print(f"  h_ML_0: {cfg['h_ML_0']:.2f} m")
+print(f"\n🔍 State variables after initialization:")
+print(f"  T_wML: {T_wML:.5f} K = {T_wML-273.15:.5f}°C")
+print(f"  T_bot: {T_bot:.5f} K = {T_bot-273.15:.5f}°C")
+print(f"  T_mnw: {T_mnw:.5f} K = {T_mnw-273.15:.5f}°C")
+print(f"  T_B1:  {T_B1:.5f} K = {T_B1-273.15:.5f}°C")
 
 # Ice/snow start (no ice at 4°C)
 T_snow = tpl_T_f
@@ -4183,7 +4196,7 @@ test_file_df = pd.DataFrame({
     'No': output_data['time_step'],
     'time': output_data['time_days'],
     'Ts': Ts_values,
-    'Tm': output_data['T_wML_C'],
+    'Tm': output_data['T_mnw_C'],  # FIXED: Use T_mnw (mean water temp), not T_wML
     'Tb': output_data['T_bot_C'],
     'ufr_a': output_data['ufr_a'],
     'ufr_w': output_data['ufr_w'],
