@@ -3670,9 +3670,11 @@ def parse_flake_nml(nml_path):
     # Note: This is an approximation. The exact value depends on the shape function integral.
     # For initial conditions, we use C_T_min = 0.5
     #
+    # CRITICAL FIX (2025-12-11): The factor is C_T, NOT C_T/2!
+    # Verified from Fortran test output: T_mnw = 3.99509°C (exact match)
     zeta_h_init = h_ML_in / depth_w_lk  # Dimensionless mixed layer depth
     C_T_init = 0.5  # Use C_T_min for initialization
-    factor_mnw = (1.0 - zeta_h_init) * C_T_init / 2.0
+    factor_mnw = (1.0 - zeta_h_init) * C_T_init  # C_T, not C_T/2!
     T_mnw_0 = T_wML_0 - (T_wML_0 - T_bot_0) * factor_mnw
 
     T_B1_0  = T_bot_0    # bottom sediment layer at bottom temp
